@@ -1,96 +1,386 @@
 ﻿<!doctype html>
 <html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>A-Frame Space Planets</title>
-    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-    <script>
-      AFRAME.registerComponent("starfield", {
-        init: function () {
-          var group = document.createElement("a-entity");
-          for (var i = 0; i < 500; i += 1) {
-            var star = document.createElement("a-sphere");
-            var radius = 70;
-            var phi = Math.random() * Math.PI * 2;
-            var costheta = Math.random() * 2 - 1;
-            var theta = Math.acos(costheta);
-            var x = radius * Math.sin(theta) * Math.cos(phi);
-            var y = radius * Math.sin(theta) * Math.sin(phi);
-            var z = radius * Math.cos(theta);
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Deep Ocean – 3D Scene</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;height:100%;overflow:hidden;background:#000d1a;}
 
-            star.setAttribute("position", x + " " + y + " " + z);
-            star.setAttribute("radius", 0.06 + Math.random() * 0.06);
-            star.setAttribute("color", "#ffffff");
-            star.setAttribute("material", "shader: flat; emissive: #ffffff; emissiveIntensity: 1;");
-            group.appendChild(star);
-          }
-          this.el.appendChild(group);
-        },
+/* 수중 시네마틱 색상 필터 페이드인/아웃 오버레이 */
+#color-filter-overlay{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:50;
+  mix-blend-mode:color;
+  opacity:0.35;
+  animation:filterFade 14s ease-in-out infinite alternate;
+}
+
+#vignette-overlay{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:51;
+  background:radial-gradient(circle at center, transparent 45%, rgba(0, 10, 30, 0.75) 100%);
+  animation:vignettePulse 8s ease-in-out infinite alternate;
+}
+
+@keyframes filterFade{
+  0%{
+    background:radial-gradient(circle, rgba(0, 220, 255, 0.7) 0%, rgba(0, 70, 160, 0.9) 100%);
+    opacity:0.25;
+  }
+  33%{
+    background:radial-gradient(circle, rgba(0, 255, 180, 0.65) 0%, rgba(0, 100, 180, 0.85) 100%);
+    opacity:0.45;
+  }
+  66%{
+    background:radial-gradient(circle, rgba(60, 120, 255, 0.7) 0%, rgba(20, 30, 140, 0.9) 100%);
+    opacity:0.3;
+  }
+  100%{
+    background:radial-gradient(circle, rgba(140, 80, 255, 0.6) 0%, rgba(0, 40, 120, 0.85) 100%);
+    opacity:0.4;
+  }
+}
+
+@keyframes vignettePulse{
+  0%{ opacity:0.6; }
+  100%{ opacity:0.85; }
+}
+
+/* 로딩 오버레이 */
+#loading{position:fixed;inset:0;background:#000d1a;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;z-index:9999;color:#a8e6ff;font-family:sans-serif;
+  transition:opacity .6s ease;}
+#loading.hide{opacity:0;pointer-events:none;}
+#loading h2{font-size:1.4rem;margin-bottom:16px;letter-spacing:.08em;}
+#bar-wrap{width:280px;height:8px;background:#0a2540;border-radius:4px;overflow:hidden;}
+#bar{height:100%;width:0%;background:linear-gradient(90deg,#00c8ff,#0050cc);border-radius:4px;transition:width .3s;}
+#loading p{margin-top:14px;font-size:.85rem;color:#4db8d4;}
+.bubble{position:absolute;bottom:-60px;border-radius:50%;background:rgba(100,200,255,.18);
+  animation:rise linear infinite;}
+@keyframes rise{0%{transform:translateY(0) scale(1);opacity:.7;}100%{transform:translateY(-110vh) scale(1.4);opacity:0;}}
+</style>
+</head>
+<body>
+
+<!-- 색상 필터 페이드인/아웃 오버레이 -->
+<div id="color-filter-overlay"></div>
+<div id="vignette-overlay"></div>
+
+<!-- 로딩 화면 -->
+<div id="loading">
+  <div class="bubble" style="width:14px;height:14px;left:15%;animation-duration:5.2s;animation-delay:0s;"></div>
+  <div class="bubble" style="width:22px;height:22px;left:35%;animation-duration:7.1s;animation-delay:1.5s;"></div>
+  <div class="bubble" style="width:10px;height:10px;left:55%;animation-duration:4.8s;animation-delay:.8s;"></div>
+  <div class="bubble" style="width:18px;height:18px;left:72%;animation-duration:6.3s;animation-delay:2s;"></div>
+  <div class="bubble" style="width:26px;height:26px;left:85%;animation-duration:8s;animation-delay:.3s;"></div>
+  <h2>🌊 Deep Ocean</h2>
+  <div id="bar-wrap"><div id="bar"></div></div>
+  <p id="loading-msg">3D 모델 디코딩 중...</p>
+</div>
+
+<script>
+
+function setBar(pct,msg){
+  document.getElementById("bar").style.width=pct+"%";
+  if(msg) document.getElementById("loading-msg").textContent=msg;
+}
+
+function fetchGlbUrl(url, label, cb){
+  setBar(10, label+" 로딩 중...");
+  fetch(url)
+    .then(function(r){ return r.blob(); })
+    .then(function(blob){
+      var objectUrl = URL.createObjectURL(blob);
+      cb(objectUrl);
+    })
+    .catch(function(err){
+      console.error('GLB load error:', err);
+    });
+}
+
+var M1=null, M2=null;
+
+function applyModels(){
+  var m1=document.getElementById("model1");
+  var m2=document.getElementById("model2");
+  if(m1) m1.setAttribute("gltf-model", M1);
+  if(m2) m2.setAttribute("gltf-model", M2);
+}
+
+function hideLoading(){
+  var el=document.getElementById("loading");
+  el.classList.add("hide");
+  setTimeout(function(){ el.style.display="none"; }, 650);
+}
+
+function startScene(){
+  setBar(100,"씬 초기화 중...");
+  setTimeout(function(){
+    hideLoading();
+    var sc=document.getElementById("mainscene");
+    if(sc.hasLoaded){
+      applyModels();
+    } else {
+      sc.addEventListener("loaded", function(){
+        applyModels();
       });
-    </script>
-    <style>
-      html,
-      body {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #020617;
+    }
+  }, 300);
+}
+
+fetchGlbUrl("model1.glb","모델 1",function(u){
+  M1=u;
+  setBar(52,"모델 2 로딩 중...");
+  fetchGlbUrl("model2.glb","모델 2",function(u2){
+    M2=u2;
+    setBar(90,"완료!");
+    setTimeout(startScene,150);
+  });
+});
+</script>
+
+<script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+<script>
+/* ════ ① 발광 입자 (바닷속 플랑크톤) ════ */
+AFRAME.registerComponent("particles",{
+  init:function(){
+    var g=document.createElement("a-entity");
+    for(var i=0;i<400;i++){
+      var p=document.createElement("a-sphere");
+      var r=50+Math.random()*15;
+      var phi=Math.random()*Math.PI*2, ct=Math.random()*2-1, th=Math.acos(ct);
+      p.setAttribute("position",r*Math.sin(th)*Math.cos(phi)+" "+r*Math.sin(th)*Math.sin(phi)+" "+r*Math.cos(th));
+      p.setAttribute("radius",0.04+Math.random()*0.09);
+      var cols=["#a0f0ff","#50c8ff","#80ffee","#ffffff","#c0eeff"];
+      var c=cols[Math.floor(Math.random()*cols.length)];
+      p.setAttribute("material","shader:flat;emissive:"+c+";emissiveIntensity:0.9;transparent:true;opacity:"+(0.4+Math.random()*0.6)+";");
+      var dur=1500+Math.floor(Math.random()*3000), delay=Math.floor(Math.random()*4000);
+      p.setAttribute("animation__glow",{property:"material.emissiveIntensity",from:0.1,to:1.4,loop:true,dir:"alternate",dur:dur,delay:delay,easing:"easeInOutSine"});
+      p.setAttribute("animation__sc",{property:"scale",from:"0.5 0.5 0.5",to:"1.5 1.5 1.5",loop:true,dir:"alternate",dur:dur,delay:delay,easing:"easeInOutSine"});
+      g.appendChild(p);
+    }
+    this.el.appendChild(g);
+  }
+});
+
+/* ════ ② 바닷속 배경 ════ */
+AFRAME.registerComponent("ocean-sky",{
+  init:function(){
+    var el=this.el;
+    el.setAttribute("geometry",{primitive:"sphere",radius:60,segmentsWidth:64,segmentsHeight:32});
+    el.setAttribute("material",{shader:"flat",side:"back",transparent:true,opacity:1});
+    var cv=document.createElement("canvas"); cv.width=1024; cv.height=512;
+    var ctx=cv.getContext("2d");
+    function draw(t){
+      ctx.clearRect(0,0,1024,512);
+      var bg=ctx.createLinearGradient(0,0,0,512);
+      bg.addColorStop(0,"#000d1a"); bg.addColorStop(0.3,"#001a33");
+      bg.addColorStop(0.65,"#002244"); bg.addColorStop(1,"#000d1a");
+      ctx.fillStyle=bg; ctx.fillRect(0,0,1024,512);
+      
+      var w=t*.00025; ctx.save(); ctx.globalCompositeOperation="screen";
+      for(var r=0;r<6;r++){
+        var cx=180+r*130+Math.sin(w+r*.7)*40;
+        var gr=ctx.createLinearGradient(cx,0,cx+60,512);
+        gr.addColorStop(0,"rgba(0,160,255,0.13)"); gr.addColorStop(.5,"rgba(0,80,180,0.06)"); gr.addColorStop(1,"rgba(0,0,0,0)");
+        ctx.fillStyle=gr; ctx.beginPath();
+        ctx.moveTo(cx+Math.sin(w+r)*15,0); ctx.lineTo(cx+70+Math.sin(w+r+1)*20,0);
+        ctx.lineTo(cx+120+Math.sin(w+r+2)*30,512); ctx.lineTo(cx-30+Math.sin(w+r+3)*25,512);
+        ctx.closePath(); ctx.fill();
       }
-    </style>
-  </head>
-  <body>
-    <a-scene background="color: #020617">
-      <a-entity starfield></a-entity>
+      ctx.restore();
+      
+      ctx.save(); ctx.globalCompositeOperation="screen";
+      [[200,350,"rgba(0,120,200,0.18)"],[600,280,"rgba(0,80,160,0.14)"],[850,400,"rgba(0,100,180,0.12)"]].forEach(function(g){
+        var gr2=ctx.createRadialGradient(g[0],g[1],10,g[0],g[1],280);
+        gr2.addColorStop(0,g[2]); gr2.addColorStop(1,"rgba(0,0,0,0)");
+        ctx.fillStyle=gr2; ctx.fillRect(0,0,1024,512);
+      });
+      ctx.restore();
+      
+      ctx.save(); ctx.globalAlpha=.07;
+      for(var b=0;b<4;b++){
+        ctx.beginPath(); var by=40+b*30;
+        for(var x=0;x<=1024;x+=6){
+          var y=by+Math.sin(x*.02+w*2+b*1.2)*8+Math.sin(x*.05+w+b)*4;
+          x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+        }
+        ctx.strokeStyle="#60d0ff"; ctx.lineWidth=1.5+b*.5; ctx.stroke();
+      }
+      ctx.restore();
+    }
+    draw(0);
+    var tex=new THREE.CanvasTexture(cv);
+    el.getObject3D("mesh").material.map=tex; el.getObject3D("mesh").material.needsUpdate=true;
+    var t=0; this._tick=function(){t+=16;draw(t);tex.needsUpdate=true;};
+  },
+  tick:function(){if(this._tick)this._tick();}
+});
 
-      <a-entity light="type: ambient; color: #667085; intensity: 0.8"></a-entity>
-      <a-entity
-        light="type: point; color: #ffffff; intensity: 1.2; distance: 90"
-        position="0 6 6"
-      ></a-entity>
+/* ════ ③ 발광 맥동 (페이드 인/아웃 호흡 효과) ════ */
+AFRAME.registerComponent("glow-pulse",{
+  schema:{minI:{type:"number",default:.3},maxI:{type:"number",default:1.8},spd:{type:"number",default:.0008}},
+  init:function(){this.t=Math.random()*1000; this.paused=false;},
+  tick:function(){
+    if(this.paused)return;
+    this.t+=this.data.spd*16;
+    var v=this.data.minI+((Math.sin(this.t)+1)/2)*(this.data.maxI-this.data.minI);
+    var m=this.el.getObject3D("mesh");
+    if(m) m.traverse(function(n){if(n.isMesh&&n.material)n.material.emissiveIntensity=v;});
+  }
+});
 
-      <a-entity id="camera-rig" position="0 1.6 0">
-        <a-camera position="0 0 0"></a-camera>
+/* ════ ④ 드래그 인터랙션 (마우스 조작 시 회전, 놓으면 떨어지지 않고 부드럽게 복귀) ════ */
+AFRAME.registerComponent("drag-rotate",{
+  schema:{orbitParent:{type:"selector"}},
+  init:function(){
+    var self=this, el=this.el;
+    this.dragging=false; this.recovering=false;
+    this.prevMouse={x:0,y:0}; this.rotVel={x:0,y:0};
+    this.originPos=null; this.baseScale=null; this.grabScale=1.08;
+    el.setAttribute("class","clickable");
 
-        <a-entity
-          animation="property: rotation; to: 0 360 0; loop: true; dur: 4500; easing: linear;"
-        >
-          <a-sphere
-            position="2.8 0.2 0"
-            radius="0.42"
-            color="#FFDE21"
-            material="metalness: 0.15; roughness: 0.65;"
-            animation="property: rotation; to: 0 360 0; loop: true; dur: 2200; easing: linear;"
-          ></a-sphere>
-        </a-entity>
+    el.addEventListener("raycaster-intersected",function(){
+      el.classList.add("hovered");
+      if(!self.dragging&&!self.recovering) document.body.style.cursor="grab";
+    });
+    el.addEventListener("raycaster-intersected-cleared",function(){
+      el.classList.remove("hovered");
+      if(!self.dragging) document.body.style.cursor="default";
+    });
 
-        <a-entity
-          rotation="14 0 0"
-          animation="property: rotation; to: 0 360 0; loop: true; dur: 7000; easing: linear;"
-        >
-          <a-sphere
-            position="4.2 -0.1 0"
-            radius="3"
-            color="#8DB997"
-            material="metalness: 0.2; roughness: 0.55;"
-            animation="property: rotation; to: 0 360 0; loop: true; dur: 3000; easing: linear;"
-          ></a-sphere>
-        </a-entity>
+    this._onMove=function(e){
+      if(!self.dragging)return;
+      var dx=e.clientX-self.prevMouse.x, dy=e.clientY-self.prevMouse.y;
+      self.rotVel.y=dx*.3; self.rotVel.x=dy*.3;
+      var rot=el.getAttribute("rotation");
+      el.setAttribute("rotation",{x:rot.x+dy*.3,y:rot.y+dx*.3,z:rot.z});
+      self.prevMouse={x:e.clientX,y:e.clientY};
+    };
 
-        <a-entity
-          rotation="-10 0 0"
-          animation="property: rotation; to: 0 360 0; loop: true; dur: 10200; easing: linear;"
-        >
-          <a-sphere
-            position="5.6 0.35 0"
-            radius="0.36"
-            color="#a3e635"
-            material="metalness: 0.18; roughness: 0.6;"
-            animation="property: rotation; to: 0 360 0; loop: true; dur: 3800; easing: linear;"
-          ></a-sphere>
-        </a-entity>
+    this._onUp=function(){
+      if(!self.dragging)return;
+      self.dragging=false;
+      document.body.style.cursor="default";
+      if(self.baseScale) el.setAttribute("scale",self.baseScale);
+      
+      // 마우스를 놓아도 아래로 떨어지지 않고, 애니메이션들을 부드럽게 재개
+      var orb=self.data.orbitParent||el.parentEl;
+      if(orb){var a=orb.components["animation"];if(a&&a.animation)a.animation.play();}
+      ["animation","animation__float","animation__sway","animation__pulse"].forEach(function(k){
+        var c2=el.components[k];if(c2&&c2.animation)c2.animation.play();
+      });
+      var gp=el.components["glow-pulse"]; if(gp) gp.paused=false;
+    };
+
+    window.addEventListener("mousemove",this._onMove);
+    window.addEventListener("mouseup",this._onUp);
+
+    document.getElementById("mainscene").addEventListener("loaded",function(){
+      var c=document.querySelector("canvas");
+      if(!c) return;
+      c.addEventListener("mousedown",function(e){
+        if(el.classList.contains("hovered")&&!self.dragging){
+          self.dragging=true; document.body.style.cursor="grabbing";
+          if(!self.baseScale) self.baseScale=el.getAttribute("scale");
+          var bs=self.baseScale, g2=self.grabScale;
+          el.setAttribute("scale",{x:bs.x*g2,y:bs.y*g2,z:bs.z*g2});
+          self.rotVel={x:0,y:0};
+          self.prevMouse={x:e.clientX,y:e.clientY};
+          
+          var orb=self.data.orbitParent||el.parentEl;
+          if(orb){var a=orb.components["animation"];if(a&&a.animation)a.animation.pause();}
+          ["animation","animation__float","animation__sway","animation__pulse"].forEach(function(k){
+            var c2=el.components[k];if(c2&&c2.animation)c2.animation.pause();
+          });
+          var gp=el.components["glow-pulse"]; if(gp) gp.paused=true;
+        }
+      });
+    });
+  },
+  tick:function(time,delta){
+    if(!delta)return;
+    var el=this.el;
+    if(!this.dragging&&(Math.abs(this.rotVel.x)>.01||Math.abs(this.rotVel.y)>.01)){
+      var rot=el.getAttribute("rotation");
+      el.setAttribute("rotation",{x:rot.x+this.rotVel.x,y:rot.y+this.rotVel.y,z:rot.z});
+      this.rotVel.x*=.94; this.rotVel.y*=.94;
+    }
+  },
+  remove:function(){window.removeEventListener("mousemove",this._onMove);window.removeEventListener("mouseup",this._onUp);}
+});
+</script>
+
+<!-- ══ A-Frame 씬 ══ -->
+<a-scene id="mainscene"
+  background="color:#000d1a"
+  raycaster="objects:.clickable"
+  cursor="rayOrigin:mouse;fuse:false">
+
+  <a-entity ocean-sky></a-entity>
+  <a-entity particles></a-entity>
+
+  <!-- 조명 (수중 시네마틱 라이트) -->
+  <a-entity light="type:ambient;color:#003366;intensity:1.1"></a-entity>
+  <a-entity light="type:directional;color:#40a0ff;intensity:1.5" position="0 15 4"></a-entity>
+  <a-entity light="type:point;color:#00e0c0;intensity:1.3;distance:50" position="-10 4 -4"></a-entity>
+  <a-entity light="type:point;color:#0080ff;intensity:1.2;distance:50" position="10 3 -6"></a-entity>
+  <a-entity light="type:point;color:#40d0ff;intensity:1.0;distance:40" position="0 6 6"></a-entity>
+
+  <a-entity id="camera-rig" position="0 1.6 0">
+    <a-camera position="0 0 0" look-controls="pointerLockEnabled: false"></a-camera>
+
+    <!-- ① GLB 모델 1 (구 크기 약 1.5의 5배에 해당하는 거대한 scale: 4.2, 천천히 공전/자전/위쪽 부유) -->
+    <a-entity id="orbit1"
+      animation="property:rotation;to:0 360 0;loop:true;dur:24000;easing:linear;">
+      <a-entity id="model1" class="clickable"
+        position="4.5 0.5 0"
+        scale="4.0 4.0 4.0"
+        glow-pulse="minI:0.3;maxI:1.8;spd:0.0006"
+        drag-rotate="orbitParent:#orbit1"
+        animation="property:rotation;to:0 360 0;loop:true;dur:16000;easing:linear;"
+        animation__float="property:position;from:4.5 0.5 0;to:4.5 1.5 0;loop:true;dir:alternate;dur:4500;easing:easeInOutSine;"
+        animation__sway="property:rotation;from:0 0 -4;to:0 0 4;loop:true;dir:alternate;dur:5500;easing:easeInOutSine;">
+        <a-entity light="type:point;color:#00c8ff;intensity:1.8;distance:8" position="0 0.8 0"></a-entity>
       </a-entity>
-    </a-scene>
-  </body>
+    </a-entity>
+
+    <!-- ② 기준 파란 구 (radius: 0.75, 직경 약 1.5) -->
+    <a-entity id="orbit2" rotation="12 0 0"
+      animation="property:rotation;to:0 360 0;loop:true;dur:32000;easing:linear;">
+      <a-sphere id="sphere2" class="clickable"
+        position="6.8 0.4 0" radius="0.75"
+        material="color:#38bdf8;metalness:0.4;roughness:0.3;emissive:#0066cc;emissiveIntensity:0.5;"
+        drag-rotate="orbitParent:#orbit2"
+        animation="property:rotation;to:0 360 0;loop:true;dur:14000;easing:linear;"
+        animation__float="property:position;from:6.8 0.4 0;to:6.8 1.2 0;loop:true;dir:alternate;dur:4000;easing:easeInOutSine;"
+        animation__pulse="property:material.emissiveIntensity;from:0.3;to:1.1;loop:true;dir:alternate;dur:3500;easing:easeInOutSine;">
+        <a-entity light="type:point;color:#38bdf8;intensity:1.4;distance:5" position="0 0 0"></a-entity>
+      </a-sphere>
+    </a-entity>
+
+    <!-- ③ GLB 모델 2 (구 크기 대비 5배 규모 scale: 3.8, 천천히 공전/자전/위쪽 부유) -->
+    <a-entity id="orbit3" rotation="-8 0 0"
+      animation="property:rotation;to:0 360 0;loop:true;dur:42000;easing:linear;">
+      <a-entity id="model2" class="clickable"
+        position="9.2 0.8 0"
+        scale="3.8 3.8 3.8"
+        glow-pulse="minI:0.3;maxI:1.7;spd:0.0007"
+        drag-rotate="orbitParent:#orbit3"
+        animation="property:rotation;to:0 360 0;loop:true;dur:18000;easing:linear;"
+        animation__float="property:position;from:9.2 0.8 0;to:9.2 1.8 0;loop:true;dir:alternate;dur:5000;easing:easeInOutSine;"
+        animation__sway="property:rotation;from:0 0 4;to:0 0 -4;loop:true;dir:alternate;dur:6000;easing:easeInOutSine;">
+        <a-entity light="type:point;color:#80ff80;intensity:1.6;distance:8" position="0 0.8 0"></a-entity>
+      </a-entity>
+    </a-entity>
+
+  </a-entity>
+</a-scene>
+</body>
 </html>
